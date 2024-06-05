@@ -553,7 +553,19 @@ def build_model(state_dict: dict):
 
     convert_weights(model)
     model.load_state_dict(state_dict)
-    return model.eval()
+    config = {
+        "embed_dim": embed_dim,
+        "image_resolution": image_resolution,
+        "vision_layers": vision_layers,
+        "vision_width": vision_width,
+        "vision_patch_size": vision_patch_size,
+        "context_length": context_length,
+        "vocab_size": vocab_size,
+        "transformer_width": transformer_width,
+        "transformer_heads": transformer_heads,
+        "transformer_layers": transformer_layers,
+    }
+    return model, config
 
 
 # Load model usinng pytorch pretrained weights

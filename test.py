@@ -6,7 +6,8 @@ from model.clip.clip_tokenize import load_clip_tokenizer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-model_config_path = "model/model_configs/ViT-L-14-336px.yaml"
+model_name = "RN50x64"
+model_config_path = f"model/model_configs/{model_name}.yaml"
 model = load_clip_model(model_config_path).to(device).eval()
 
 preprocess = load_clip_transform(model.visual.input_resolution)

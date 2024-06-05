@@ -1,7 +1,7 @@
 context_length: 77
 embed_dim: 768
-image_resolution: 336
-pretrained_weights_path: pretrained_weights/ViT-L-14-336px.pth
+image_resolution: 224
+pretrained_weights_path: pretrained_weights/ViT-L-14.pth
 transformer_heads: 12
 transformer_layers: 12
 transformer_width: 768

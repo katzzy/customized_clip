@@ -1,0 +1,15 @@
+context_length: 77
+embed_dim: 640
+image_resolution: 288
+pretrained_weights_path: pretrained_weights/RN50x4.pth
+transformer_heads: 10
+transformer_layers: 12
+transformer_width: 640
+vision_layers: !!python/tuple
+- 4
+- 6
+- 10
+- 6
+vision_patch_size: null
+vision_width: 80
+vocab_size: 49408
