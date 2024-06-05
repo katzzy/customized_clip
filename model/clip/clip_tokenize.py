@@ -166,8 +166,10 @@ class SimpleTokenizer(object):
         return text
 
 
+_tokenizer = SimpleTokenizer()
+
+
 def tokenize(
-    _tokenizer: SimpleTokenizer,
     texts: Union[str, List[str]],
     context_length: int = 77,
     truncate: bool = False,
@@ -218,3 +220,7 @@ def tokenize(
         result[i, : len(tokens)] = torch.tensor(tokens)
 
     return result
+
+
+def load_clip_tokenizer():
+    return tokenize
