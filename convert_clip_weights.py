@@ -5,7 +5,6 @@ import urllib
 import warnings
 import yaml
 from tqdm import tqdm
-from model.clip.clip_model import build_model
 
 
 _MODELS = {
@@ -80,7 +79,7 @@ def _download(url: str, root: str):
     return download_target
 
 
-def load_model(name: str, download_root: str = None):
+def load_state_dict(name: str, download_root: str = None):
     if name not in _MODELS:
         raise ValueError(
             f"Model {name} not available. Available models: {', '.join(_MODELS.keys())}"
@@ -97,20 +96,89 @@ def load_model(name: str, download_root: str = None):
         except RuntimeError:
             raise NotImplementedError("Only JIT models are supported")
 
-    model, config = build_model(model.state_dict())
-    return model, config
+    state_dict = model.state_dict()
+    vit = "visual.proj" in state_dict
+
+    if vit:
+        vision_width = state_dict["visual.conv1.weight"].shape[0]
+        vision_layers = len(
+            [
+                k
+                for k in state_dict.keys()
+                if k.startswith("visual.") and k.endswith(".attn.in_proj_weight")
+            ]
+        )
+        vision_patch_size = state_dict["visual.conv1.weight"].shape[-1]
+        grid_size = round(
+            (state_dict["visual.positional_embedding"].shape[0] - 1) ** 0.5
+        )
+        image_resolution = vision_patch_size * grid_size
+    else:
+        counts: list = [
+            len(
+                set(
+                    k.split(".")[2]
+                    for k in state_dict
+                    if k.startswith(f"visual.layer{b}")
+                )
+            )
+            for b in [1, 2, 3, 4]
+        ]
+        vision_layers = tuple(counts)
+        vision_width = state_dict["visual.layer1.0.conv1.weight"].shape[0]
+        output_width = round(
+            (state_dict["visual.attnpool.positional_embedding"].shape[0] - 1) ** 0.5
+        )
+        vision_patch_size = None
+        assert (
+            output_width**2 + 1
+            == state_dict["visual.attnpool.positional_embedding"].shape[0]
+        )
+        image_resolution = output_width * 32
+
+    embed_dim = state_dict["text_projection"].shape[1]
+    context_length = state_dict["positional_embedding"].shape[0]
+    vocab_size = state_dict["token_embedding.weight"].shape[0]
+    transformer_width = state_dict["ln_final.weight"].shape[0]
+    transformer_heads = transformer_width // 64
+    transformer_layers = len(
+        set(
+            k.split(".")[2] for k in state_dict if k.startswith("transformer.resblocks")
+        )
+    )
+    if isinstance(vision_layers, tuple):
+        vision_layers = list(vision_layers)
+
+    for key in ["input_resolution", "context_length", "vocab_size"]:
+        if key in state_dict:
+            del state_dict[key]
+
+    config = {
+        "embed_dim": embed_dim,
+        "image_resolution": image_resolution,
+        "vision_layers": vision_layers,
+        "vision_width": vision_width,
+        "vision_patch_size": vision_patch_size,
+        "context_length": context_length,
+        "vocab_size": vocab_size,
+        "transformer_width": transformer_width,
+        "transformer_heads": transformer_heads,
+        "transformer_layers": transformer_layers,
+    }
+
+    return state_dict, config
 
 
 def convert_clip_weights():
     for model_name in _MODELS.keys():
         print(f"Converting {model_name}")
-        model, config = load_model(model_name)
+        state_dict, config = load_state_dict(model_name)
         if "@" in model_name:
             model_name = model_name.replace("@", "-")
         if "/" in model_name:
             model_name = model_name.replace("/", "-")
         save_path = f"pretrained_weights/{model_name}.pth"
-        torch.save(model.state_dict(), save_path)
+        torch.save(state_dict, save_path)
         config["pretrained_weights_path"] = save_path
         with open(f"model/model_configs/{model_name}.yaml", "w") as f:
             yaml.dump(config, f, sort_keys=False)
