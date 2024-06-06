@@ -280,8 +280,12 @@ class VisionTransformer(nn.Module):
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
 
+    @property
+    def dtype(self):
+        return self.conv1.weight.dtype
+
     def forward(self, x: torch.Tensor):
-        x = self.conv1(x)  # shape = [*, width, grid, grid]
+        x = self.conv1(x.type(self.dtype))  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
         x = torch.cat(
@@ -307,150 +311,6 @@ class VisionTransformer(nn.Module):
             x = x @ self.proj
 
         return x
-
-
-class CLIP(nn.Module):
-    def __init__(
-        self,
-        embed_dim: int,
-        # vision
-        image_resolution: int,
-        vision_layers: Union[Tuple[int, int, int, int], int],
-        vision_width: int,
-        vision_patch_size: int,
-        # text
-        context_length: int,
-        vocab_size: int,
-        transformer_width: int,
-        transformer_heads: int,
-        transformer_layers: int,
-    ):
-        super().__init__()
-
-        self.context_length = context_length
-
-        if isinstance(vision_layers, (tuple, list)):
-            vision_heads = vision_width * 32 // 64
-            self.visual = ModifiedResNet(
-                layers=vision_layers,
-                output_dim=embed_dim,
-                heads=vision_heads,
-                input_resolution=image_resolution,
-                width=vision_width,
-            )
-        else:
-            vision_heads = vision_width // 64
-            self.visual = VisionTransformer(
-                input_resolution=image_resolution,
-                patch_size=vision_patch_size,
-                width=vision_width,
-                layers=vision_layers,
-                heads=vision_heads,
-                output_dim=embed_dim,
-            )
-
-        self.transformer = Transformer(
-            width=transformer_width,
-            layers=transformer_layers,
-            heads=transformer_heads,
-            attn_mask=self.build_attention_mask(),
-        )
-
-        self.vocab_size = vocab_size
-        self.token_embedding = nn.Embedding(vocab_size, transformer_width)
-        self.positional_embedding = nn.Parameter(
-            torch.empty(self.context_length, transformer_width)
-        )
-        self.ln_final = LayerNorm(transformer_width)
-
-        self.text_projection = nn.Parameter(torch.empty(transformer_width, embed_dim))
-        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
-
-        self.initialize_parameters()
-
-    def initialize_parameters(self):
-        nn.init.normal_(self.token_embedding.weight, std=0.02)
-        nn.init.normal_(self.positional_embedding, std=0.01)
-
-        if isinstance(self.visual, ModifiedResNet):
-            if self.visual.attnpool is not None:
-                std = self.visual.attnpool.c_proj.in_features**-0.5
-                nn.init.normal_(self.visual.attnpool.q_proj.weight, std=std)
-                nn.init.normal_(self.visual.attnpool.k_proj.weight, std=std)
-                nn.init.normal_(self.visual.attnpool.v_proj.weight, std=std)
-                nn.init.normal_(self.visual.attnpool.c_proj.weight, std=std)
-
-            for resnet_block in [
-                self.visual.layer1,
-                self.visual.layer2,
-                self.visual.layer3,
-                self.visual.layer4,
-            ]:
-                for name, param in resnet_block.named_parameters():
-                    if name.endswith("bn3.weight"):
-                        nn.init.zeros_(param)
-
-        proj_std = (self.transformer.width**-0.5) * (
-            (2 * self.transformer.layers) ** -0.5
-        )
-        attn_std = self.transformer.width**-0.5
-        fc_std = (2 * self.transformer.width) ** -0.5
-        for block in self.transformer.resblocks:
-            nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
-            nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
-            nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
-            nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
-
-        if self.text_projection is not None:
-            nn.init.normal_(self.text_projection, std=self.transformer.width**-0.5)
-
-    def build_attention_mask(self):
-        # lazily create causal attention mask,
-        # with full attention between the vision tokens
-        # pytorch uses additive attention mask; fill with -inf
-        mask = torch.empty(self.context_length, self.context_length)
-        mask.fill_(float("-inf"))
-        mask.triu_(1)  # zero out the lower diagonal
-        return mask
-
-    @property
-    def dtype(self):
-        return self.visual.conv1.weight.dtype
-
-    def encode_image(self, image):
-        return self.visual(image.type(self.dtype))
-
-    def encode_text(self, text):
-        x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
-
-        x = x + self.positional_embedding.type(self.dtype)
-        x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
-        x = x.permute(1, 0, 2)  # LND -> NLD
-        x = self.ln_final(x).type(self.dtype)
-
-        # x.shape = [batch_size, n_ctx, transformer.width]
-        # take features from
-        # the eot embedding (eot_token is the highest number in each sequence)
-        x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection
-
-        return x
-
-    def forward(self, image, text):
-        image_features = self.encode_image(image)
-        text_features = self.encode_text(text)
-
-        # normalized features
-        image_features = image_features / image_features.norm(dim=1, keepdim=True)
-        text_features = text_features / text_features.norm(dim=1, keepdim=True)
-
-        # cosine similarity as logits
-        logit_scale = self.logit_scale.exp()
-        logits_per_image = logit_scale * image_features @ text_features.t()
-        logits_per_text = logits_per_image.t()
-
-        # shape = [global_batch_size, global_batch_size]
-        return logits_per_image, logits_per_text
 
 
 class TextTransformer(nn.Module):
@@ -532,7 +392,7 @@ class TextTransformer(nn.Module):
         return x
 
 
-class CustomizedCLIP(nn.Module):
+class CLIP(nn.Module):
     def __init__(
         self,
         embed_dim: int,
@@ -583,15 +443,11 @@ class CustomizedCLIP(nn.Module):
 
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
-    @property
-    def dtype(self):
-        return self.visual.conv1.weight.dtype
-
     def encode_image(self, image):
-        return self.visual(image.type(self.dtype))
+        return self.visual(image)
 
     def encode_text(self, text):
-        return self.textual(text.type(self.dtype))
+        return self.textual(text)
 
     def forward(self, image, text):
         image_features = self.encode_image(image)
@@ -639,7 +495,6 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-# Load model usinng pytorch pretrained weights
 def load_clip_model(model_config_path: str):
 
     with open(model_config_path, "r") as f:
@@ -651,39 +506,26 @@ def load_clip_model(model_config_path: str):
     model = CLIP(**model_config)
 
     model_state_dict = model.state_dict()
+
+    text_keys = []
+
+    for key in list(model_state_dict.keys()):
+        if "textual" in key:
+            text_key = key.replace("textual.", "")
+            text_keys.append(text_key)
+
     pretrained_state_dict = torch.load(pretrained_weights_path)
+
+    for key in list(pretrained_state_dict.keys()):
+        if key in text_keys:
+            new_key = f"textual.{key}"
+            pretrained_state_dict[new_key] = pretrained_state_dict.pop(key)
 
     if is_state_dict_compatible(model_state_dict, pretrained_state_dict):
         print("State_dict is compatible!")
         model.load_state_dict(pretrained_state_dict)
     else:
         raise ValueError("Incompatible state_dict")
-
-    model.load_state_dict(torch.load(pretrained_weights_path))
-
-    return model
-
-
-def load_clip_customized_model(model_config_path: str):
-
-    with open(model_config_path, "r") as f:
-        model_config = yaml.safe_load(f)
-
-    pretrained_weights_path = model_config["pretrained_weights_path"]
-    model_config.pop("pretrained_weights_path")
-
-    model = CustomizedCLIP(**model_config)
-
-    model_state_dict = model.state_dict()
-    pretrained_state_dict = torch.load(pretrained_weights_path)
-
-    if is_state_dict_compatible(model_state_dict, pretrained_state_dict):
-        print("State_dict is compatible!")
-        model.load_state_dict(pretrained_state_dict)
-    else:
-        raise ValueError("Incompatible state_dict")
-
-    model.load_state_dict(torch.load(pretrained_weights_path))
 
     return model
 
@@ -697,7 +539,18 @@ def is_state_dict_compatible(model_state_dict: dict, pretrained_state_dict: dict
 
     if extra_keys:
         print(f"Extra keys found in model_state_dict: {extra_keys}")
+        print(f"Total extra keys: {len(extra_keys)}")
     if missing_keys:
         print(f"Missing keys in model_state_dict: {missing_keys}")
+        print(f"Total missing keys: {len(missing_keys)}")
 
     return not extra_keys and not missing_keys
+
+
+def main():
+    model = load_clip_model("model/model_configs/ViT-L-14.yaml")
+    print(model)
+
+
+if __name__ == "__main__":
+    main()

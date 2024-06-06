@@ -1,3 +1,4 @@
+# Copyright: OpenAI
 import gzip
 import html
 import os

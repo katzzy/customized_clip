@@ -1,3 +1,4 @@
+# Copyright: OpenAI
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 from PIL import Image
 
