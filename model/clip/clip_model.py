@@ -507,12 +507,8 @@ def load_clip_model(model_config_path: str):
 
     model_state_dict = model.state_dict()
 
-    text_keys = []
-
-    for key in list(model_state_dict.keys()):
-        if "textual" in key:
-            text_key = key.replace("textual.", "")
-            text_keys.append(text_key)
+    text_keys = list(filter(lambda x: "textual" in x, model_state_dict.keys()))
+    text_keys = list(map(lambda x: x.replace("textual.", ""), text_keys))
 
     pretrained_state_dict = torch.load(pretrained_weights_path)
 
