@@ -113,7 +113,7 @@ def convert_clip_weights():
         torch.save(model.state_dict(), save_path)
         config["pretrained_weights_path"] = save_path
         with open(f"model/model_configs/{model_name}.yaml", "w") as f:
-            yaml.dump(config, f)
+            yaml.dump(config, f, sort_keys=False)
         print(f"Saved {model_name}.pth")
 
 

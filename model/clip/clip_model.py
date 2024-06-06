@@ -533,7 +533,8 @@ def build_model(state_dict: dict):
             k.split(".")[2] for k in state_dict if k.startswith("transformer.resblocks")
         )
     )
-
+    if isinstance(vision_layers, tuple):
+        vision_layers = list(vision_layers)
     model = CLIP(
         embed_dim,
         image_resolution,
@@ -599,9 +600,6 @@ def is_state_dict_compatible(model_state_dict: dict, pretrained_state_dict: dict
 
     extra_keys = model_keys - pretrained_keys
     missing_keys = pretrained_keys - model_keys
-
-    print(f"Extra keys found in model_state_dict: {extra_keys}")
-    print(f"Missing keys in model_state_dict: {missing_keys}")
 
     if extra_keys:
         print(f"Extra keys found in model_state_dict: {extra_keys}")

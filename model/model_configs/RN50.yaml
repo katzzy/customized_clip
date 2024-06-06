@@ -1,15 +1,15 @@
-context_length: 77
 embed_dim: 1024
 image_resolution: 224
-pretrained_weights_path: pretrained_weights/RN50.pth
-transformer_heads: 8
-transformer_layers: 12
-transformer_width: 512
-vision_layers: !!python/tuple
+vision_layers:
 - 3
 - 4
 - 6
 - 3
-vision_patch_size: null
 vision_width: 64
+vision_patch_size: null
+context_length: 77
 vocab_size: 49408
+transformer_width: 512
+transformer_heads: 8
+transformer_layers: 12
+pretrained_weights_path: pretrained_weights/RN50.pth
