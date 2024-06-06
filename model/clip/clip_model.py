@@ -474,7 +474,24 @@ def convert_weights(model: nn.Module):
 
 
 def load_clip_model(model_config_path: str):
+    """
+    Load pretrained weights into the new model architecture.
+    The model configuration file should contain the following keys:
+    - pretrained_weights_path: Path to the pretrained weights file
+    - embed_dim: Embedding dimension
+    - image_resolution: Image resolution
+    - vision_layers: Tuple of integers or an integer
+    - vision_width: Vision width
+    - vision_patch_size: Vision patch size
+    - context_length: Context length
+    - vocab_size: Vocabulary size
+    - transformer_width: Transformer width
+    - transformer_heads: Transformer heads
+    - transformer_layers: Transformer layers
 
+    Args:
+    - model_config_path: Path to the model configuration file
+    """
     with open(model_config_path, "r") as f:
         model_config = yaml.safe_load(f)
 
